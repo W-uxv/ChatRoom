@@ -59,7 +59,7 @@ void ServerWorker::sendMessage(const QString &text, const QString &type)
         // create a QDatastream operating on the socket
         QDataStream serverStream(m_serverSocket);
         serverStream.setVersion(QDataStream::Qt_5_12);
-        //Create the JSoN we want to send
+        //Create the JSoN we want to send.
         QJsonObject message;
         message["type"]= type;
         message["text"]= text;
