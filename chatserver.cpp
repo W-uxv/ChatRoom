@@ -25,10 +25,17 @@ void ChatServer::incomingConnection(qintptr socketDescriptor)
     emit logMessage("新的用户连接上了");
 }
 
-void ChatServer::broadcast(const QJsonObject &message, ServerWorker *exclude)
+void ChatServer::broadcast(const QJsonObject &message)
 {
     for(ServerWorker *worker: m_clients) {
         worker->sendJson(message);
+    }
+}
+
+void ChatServer::unicast(const QJsonObject &message, const QString receiver, ServerWorker *exclude) {
+    exclude->sendJson(message);
+    for(ServerWorker *worker: m_clients) {
+        if(worker->userName() == receiver) worker->sendJson(message);
     }
 }
 
@@ -54,7 +61,7 @@ void ChatServer::jsonReceived(ServerWorker *sender, const QJsonObject &docObj)
         message["text"] = text;
         message["sender"] = sender->userName();
 
-        broadcast(message,sender);
+        broadcast(message);
     } else if(typeVal.toString().compare("login", Qt::CaseInsensitive)==0) {
         const QJsonValue usernameVal = docObj.value("text");
         if(usernameVal.isNull() || !usernameVal.isString())
@@ -63,7 +70,7 @@ void ChatServer::jsonReceived(ServerWorker *sender, const QJsonObject &docObj)
         QJsonObject connectedMessage;
         connectedMessage["type"]="newuser";
         connectedMessage["username"]=usernameVal.toString();
-        broadcast(connectedMessage,sender);
+        broadcast(connectedMessage);
 
         QJsonObject userListMessage;
         userListMessage["type"]= "userlist";
@@ -76,6 +83,25 @@ void ChatServer::jsonReceived(ServerWorker *sender, const QJsonObject &docObj)
         }
         userListMessage["userlist"]=userlist;
         sender->sendJson(userListMessage);
+    } else if(typeVal.toString().compare("unicast",Qt::CaseInsensitive)== 0) {
+        const QJsonValue textVal= docObj.value("text");
+        if(textVal.isNull() || !textVal.isString())
+            return;
+
+        const QString text = textVal.toString().trimmed();
+        if(text.isEmpty())
+            return;
+
+        const QJsonValue receiverVal = docObj.value("receiver").toString();
+        if(receiverVal.isNull() || !receiverVal.isString())
+            return;
+
+        QJsonObject message;
+        message["type"] = "unicast";
+        message["text"] = text;
+        message["sender"] = sender->userName();
+        message["receiver"] = receiverVal.toString();
+        unicast(message,receiverVal.toString(),sender);
     }
 }
 
@@ -86,7 +112,7 @@ void ChatServer::userDisconnected(ServerWorker *sender)
     if(!userName.isEmpty()){
         QJsonObject disconnectedMessage;
         disconnectedMessage["type"]="userdisconnected",disconnectedMessage["username"]= userName;
-        broadcast(disconnectedMessage,nullptr);
+        broadcast(disconnectedMessage);
         emit logMessage(userName + "disconnected");
     }
     sender->deleteLater();
