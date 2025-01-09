@@ -1,4 +1,5 @@
 #include "chatserver.h"
+#include "idatabase.h"
 #include "serverworker.h"
 #include <QJsonValue>
 #include <QJsonObject>
@@ -22,7 +23,7 @@ void ChatServer::incomingConnection(qintptr socketDescriptor)
     connect(worker, &ServerWorker::disconnectedFromClient, this,
             std::bind(&ChatServer::userDisconnected,this,worker));
     m_clients.append(worker);
-    emit logMessage("新的用户连接上了");
+    //emit logMessage("新的用户连接上了");
 }
 
 void ChatServer::broadcast(const QJsonObject &message)
@@ -61,11 +62,36 @@ void ChatServer::jsonReceived(ServerWorker *sender, const QJsonObject &docObj)
         message["text"] = text;
         message["sender"] = sender->userName();
 
+        int status = IDatabase::getInstance().getStatus(sender->userName());
+        if(status != 1) return;
         broadcast(message);
     } else if(typeVal.toString().compare("login", Qt::CaseInsensitive)==0) {
         const QJsonValue usernameVal = docObj.value("text");
         if(usernameVal.isNull() || !usernameVal.isString())
             return;
+
+        QJsonObject statusMessage;
+        statusMessage["type"]="status";
+        for(ServerWorker *worker:m_clients){
+            if(worker->userName() == usernameVal.toString()) {
+                statusMessage["status"] = "用户已登录";
+                sender->sendJson(statusMessage);
+                return;
+            }
+        }
+
+        const QJsonValue passwordVal = docObj.value("password");
+        if(passwordVal.isNull() || !passwordVal.isString())
+            return;
+
+        QString status = IDatabase::getInstance().userLogin(usernameVal.toString(),
+                                                            passwordVal.toString());
+        statusMessage["status"] = status;
+        sender->sendJson(statusMessage);
+        if(status != "LoginOk") return;
+        emit logMessage("新的用户连接上了");
+
+
         sender->setUserName(usernameVal.toString());
         QJsonObject connectedMessage;
         connectedMessage["type"]="newuser";
@@ -102,6 +128,27 @@ void ChatServer::jsonReceived(ServerWorker *sender, const QJsonObject &docObj)
         message["sender"] = sender->userName();
         message["receiver"] = receiverVal.toString();
         unicast(message,receiverVal.toString(),sender);
+    } else if(typeVal.toString().compare("opt",Qt::CaseInsensitive)== 0) {
+        const QJsonValue statusVal= docObj.value("text");
+        const QString userName = docObj.value("userName").toString();
+        if(statusVal.toString() == "2") IDatabase::getInstance().silence(userName);
+        else if(statusVal.toString() == "1") IDatabase::getInstance().resume(userName);
+        else if(statusVal.toString() == "0") {
+            QJsonObject banMessage;
+            banMessage["type"] = "ban";
+            for(ServerWorker *worker : m_clients) {
+                if(worker->userName() == userName) worker->sendJson(banMessage);
+            }
+        }
+    }else if(typeVal.toString().compare("register",Qt::CaseInsensitive)== 0) {
+        const QJsonValue userNameVal = docObj.value("text");
+        if(userNameVal.isNull() || !userNameVal.isString())
+            return;
+
+        const QJsonValue passwordVal = docObj.value("password");
+        if(passwordVal.isNull() || !passwordVal.isString())
+            return;
+        IDatabase::getInstance().reg(userNameVal.toString(),passwordVal.toString());
     }
 }
 
